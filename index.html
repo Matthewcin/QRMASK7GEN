@@ -3,46 +3,31 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Generador QR</title>
+<title>222Generador QR (L - Mask 7)</title>
 <style>
   *{box-sizing:border-box}
-  /* Estilos normales */
   body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;
-    font-family:system-ui,sans-serif;background:#0f1115;color:#e8eaed}
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    background:#0f1115;color:#e8eaed}
   .card{background:#171a21;border:1px solid #262b36;border-radius:16px;
-    padding:24px;max-width:520px;width:100%;text-align:center}
+    padding:24px;max-width:520px;width:100%;text-align:center;
+    box-shadow:0 20px 40px rgba(0,0,0,.35)}
+  h1{font-size:18px;margin:0 0 14px;font-weight:600;letter-spacing:.3px}
+  #msg{font-size:13px;color:#9aa4b2;margin-bottom:16px;min-height:18px}
   canvas{display:block;margin:0 auto;width:100%;max-width:320px;height:auto;
     background:#fff;padding:8px;border-radius:10px;image-rendering:pixelated}
-  
-  /* MODO LIMPIO (RAW): Se activa con &raw=1 */
-  body.raw-mode {
-    background: #ffffff !important;
-    padding: 0 !important;
-    display: flex !important;
-    justify-content: center !important;
-    align-items: center !important;
-    height: 100vh;
-    width: 100vw;
-    overflow: hidden;
-  }
-  body.raw-mode .card {
-    background: transparent !important;
-    border: none !important;
-    padding: 0 !important;
-    max-width: none !important;
-    box-shadow: none !important;
-  }
-  body.raw-mode h1, body.raw-mode #msg, body.raw-mode .btn, body.raw-mode form {
-    display: none !important;
-  }
-  body.raw-mode canvas {
-    padding: 0 !important;
-    border-radius: 0 !important;
-    max-width: 100vw;
-    max-height: 100vh;
-    width: auto !important;
-    height: 100% !important;
-  }
+  .btn{display:inline-block;margin-top:16px;background:#3b82f6;color:#fff;border:0;
+    padding:12px 24px;border-radius:10px;font-size:15px;font-weight:600;
+    cursor:pointer;text-decoration:none;width:100%;transition:background 0.2s}
+  .btn:hover{background:#2563eb}
+  .btn:active{transform:translateY(1px)}
+  form{margin-top:18px;display:flex;gap:8px}
+  input{flex:1;min-width:0;background:#0f1115;border:1px solid #2b313d;color:#e8eaed;
+    padding:11px 12px;border-radius:10px;font-size:14px}
+  input:focus{outline:2px solid #3b82f6;outline-offset:-1px}
+  button[type=submit]{background:#262b36;color:#fff;border:0;padding:0 16px;
+    border-radius:10px;font-weight:600;cursor:pointer;font-size:14px}
+  button[type=submit]:hover{background:#3b82f6}
 </style>
 </head>
 <body>
@@ -51,6 +36,10 @@
   <div id="msg">Cargando…</div>
   <canvas id="qr" hidden></canvas>
   <a id="dl" class="btn" hidden download="qr.png">Descargar PNG</a>
+  <form id="form" hidden>
+    <input id="txt" placeholder="Escribí el texto…" autocomplete="off">
+    <button type="submit">Generar</button>
+  </form>
 </div>
 
 <script>
@@ -58,7 +47,7 @@
 'use strict';
 
 /* ============================================================
-   Codificador QR (L, Mask 7)
+   Codificador QR (Versiones 1-10) - Nivel L, Máscara 7 fija
    ============================================================ */
 var QR = (function(){
   var EXP = new Uint8Array(512), LOG = new Uint8Array(256);
@@ -102,7 +91,10 @@ var QR = (function(){
   }
 
   var V_SIZE = {1:21,2:25,3:29,4:33,5:37,6:41,7:45,8:49,9:53,10:57};
-  var ALIGN = {1:[],2:[6,18],3:[6,22],4:[6,26],5:[6,30],6:[6,34],7:[6,22,38],8:[6,24,42],9:[6,26,46],10:[6,28,50]};
+  var ALIGN = {
+    1:[], 2:[6,18], 3:[6,22], 4:[6,26], 5:[6,30], 6:[6,34],
+    7:[6,22,38], 8:[6,24,42], 9:[6,26,46], 10:[6,28,50]
+  };
   var EC_LEVELS = { L: 1, M: 0, Q: 3, H: 2 };
   var EC_DATA = {
     L: {1:[7,[[1,19]]],2:[10,[[1,34]]],3:[15,[[1,55]]],4:[20,[[1,80]]],5:[26,[[1,108]]],6:[18,[[2,68]]],7:[20,[[2,78]]],8:[24,[[2,97]]],9:[30,[[2,116]]],10:[18,[[2,68],[2,69]]]},
@@ -152,11 +144,14 @@ var QR = (function(){
   function encode(text, level, mask){
     var bytes = new TextEncoder().encode(text);
     var version = pickVersion(bytes.length, level);
-    if (!version) throw new Error('Texto muy largo');
+    if (!version) throw new Error('Texto demasiado largo para Nivel ' + level);
     var size = V_SIZE[version];
+
+    // Bitstream
     var bits = [];
     function push(val, len){ for (var i = len-1; i >= 0; i--) bits.push((val >> i) & 1); }
-    push(4, 4); push(bytes.length, version <= 9 ? 8 : 16);
+    push(4, 4); // Modo byte
+    push(bytes.length, version <= 9 ? 8 : 16);
     for (var i = 0; i < bytes.length; i++) push(bytes[i], 8);
     var totalBits = dataCodewords(version, level) * 8;
     var term = Math.min(4, totalBits - bits.length);
@@ -170,6 +165,7 @@ var QR = (function(){
     var dataCw = new Uint8Array(bits.length / 8);
     for (var i = 0; i < bits.length; i++) if (bits[i]) dataCw[i >> 3] |= (0x80 >> (i & 7));
 
+    // Bloques RS
     var ecLen = EC_DATA[level][version][0], groups = EC_DATA[level][version][1];
     var blocks = [], offset = 0;
     for (var gi = 0; gi < groups.length; gi++){
@@ -190,6 +186,7 @@ var QR = (function(){
         cw.push(ecBlocks[j][i]);
     cw = new Uint8Array(cw);
 
+    // Matriz
     var mod = [], isF = [];
     for (var r = 0; r < size; r++){
       mod.push(new Uint8Array(size));
@@ -213,12 +210,14 @@ var QR = (function(){
         }
       }
     };
+
     placeFinder(0, 0); placeFinder(0, size-7); placeFinder(size-7, 0);
     for (var i = 8; i < size - 8; i++){
       var v = (i % 2 === 0) ? 1 : 0;
       setF(6, i, v); setF(i, 6, v);
     }
     setF(size-8, 8, 1);
+
     var ap = ALIGN[version];
     for (var i = 0; i < ap.length; i++){
       for (var j = 0; j < ap.length; j++){
@@ -232,6 +231,7 @@ var QR = (function(){
         }
       }
     }
+
     for (var i = 0; i < 15; i++){
       var r1, c1, r2, c2;
       if (i < 6){ r1 = 8; c1 = i; }
@@ -244,6 +244,7 @@ var QR = (function(){
       else { r2 = 8; c2 = size - 15 + i; }
       isF[r2][c2] = 1;
     }
+
     var bitIdx = 0, total = cw.length * 8;
     var row = size - 1, col = size - 1, dir = -1;
     while (col > 0){
@@ -268,6 +269,7 @@ var QR = (function(){
       row = (dir === -1) ? size - 1 : 0;
       col -= 2;
     }
+
     var fmt = formatInfo(EC_LEVELS[level], mask);
     for (var i = 0; i < 15; i++){
       var bit = (fmt >> i) & 1;
@@ -282,34 +284,40 @@ var QR = (function(){
       else { r2 = 8; c2 = size - 15 + i; }
       mod[r2][c2] = bit;
     }
+
     return { modules: mod, size: size };
   }
+
   return { encode: encode };
 })();
 
 /* ============================================================
-   UI
+   UI + Descarga Automática
    ============================================================ */
 var qs = new URLSearchParams(location.search);
 var texto = (qs.get('texto') || qs.get('text') || qs.get('t') || '').trim();
-var isRaw = qs.get('raw') === '1';
-
-if (isRaw) {
-  document.body.classList.add('raw-mode');
-}
 
 var canvas = document.getElementById('qr');
 var dl = document.getElementById('dl');
 var msg = document.getElementById('msg');
+var form = document.getElementById('form');
+var input = document.getElementById('txt');
 
 if (!texto) {
-  msg.textContent = 'Falta el texto en la URL';
+  msg.textContent = 'Agregá ?texto=TU_TEXTO al final de la URL';
+  form.hidden = false;
+  form.addEventListener('submit', function(e){
+    e.preventDefault();
+    var v = input.value.trim();
+    if (v) location.search = '?texto=' + encodeURIComponent(v);
+  });
 } else {
   try {
+    // Forzamos Nivel L y Máscara 7 para coincidir con tu imagen
     var qr = QR.encode(texto, 'L', 7);
     var n = qr.size;
-    var QUIET = 4;
-    var scale = 8; // Resolución
+    var QUIET = 4; // Zona de silencio (blanca)
+    var scale = 8; // Tamaño del PNG (n * 8 px + margen)
     var px = (n + QUIET * 2) * scale;
 
     canvas.width = px;
@@ -327,38 +335,29 @@ if (!texto) {
     }
     canvas.hidden = false;
 
-   if (isRaw) {
-      canvas.toBlob(function(blob){
-        if (!blob) return;
-
-        var url = URL.createObjectURL(blob);
-        var a = document.createElement('a');
-
-        a.href = url;
-        a.download = 'QRs.png';
-
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-
-        setTimeout(function(){
-          URL.revokeObjectURL(url);
-        }, 1000);
-      }, 'image/png');
-    }
-
-    // Solo generar botón de descarga si NO estamos en modo raw
-    if (!isRaw) {
-      canvas.toBlob(function(blob){
-        if (!blob) return;
-        var url = URL.createObjectURL(blob);
-        var safe = texto.replace(/[^a-zA-Z0-9_-]+/g, '').slice(0, 40) || 'codigo';
-        dl.href = url;
-        dl.download = 'qr-' + safe + '.png';
-        dl.hidden = false;
-        msg.textContent = 'Listo.';
-      }, 'image/png');
-    }
+    canvas.toBlob(function(blob){
+      if (!blob) { msg.textContent = 'Error al generar PNG.'; return; }
+      
+      var url = URL.createObjectURL(blob);
+      var safe = texto.replace(/[^a-zA-Z0-9_-]+/g, '').slice(0, 40) || 'codigo';
+      var name = 'qr-' + safe + '.png';
+      
+      // Configurar botón de descarga manual (por si el navegador bloquea la automática)
+      dl.href = url;
+      dl.download = name;
+      dl.hidden = false;
+      
+      // Disparar descarga automática
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      
+      msg.textContent = 'PNG ' + px + '×' + px + ' px — Descarga iniciada';
+    }, 'image/png');
+    
   } catch (err) {
     msg.textContent = 'Error: ' + err.message;
   }
