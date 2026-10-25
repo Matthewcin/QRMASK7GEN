@@ -3,9 +3,47 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="stylesheet" href="./css/styles.css">
-<title>Generador QR (L - Mask 7)</title>
-<source>
+<title>Generador QR</title>
+<style>
+  *{box-sizing:border-box}
+  /* Estilos normales */
+  body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;
+    font-family:system-ui,sans-serif;background:#0f1115;color:#e8eaed}
+  .card{background:#171a21;border:1px solid #262b36;border-radius:16px;
+    padding:24px;max-width:520px;width:100%;text-align:center}
+  canvas{display:block;margin:0 auto;width:100%;max-width:320px;height:auto;
+    background:#fff;padding:8px;border-radius:10px;image-rendering:pixelated}
+  
+  /* MODO LIMPIO (RAW): Se activa con &raw=1 */
+  body.raw-mode {
+    background: #ffffff !important;
+    padding: 0 !important;
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    height: 100vh;
+    width: 100vw;
+    overflow: hidden;
+  }
+  body.raw-mode .card {
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+    max-width: none !important;
+    box-shadow: none !important;
+  }
+  body.raw-mode h1, body.raw-mode #msg, body.raw-mode .btn, body.raw-mode form {
+    display: none !important;
+  }
+  body.raw-mode canvas {
+    padding: 0 !important;
+    border-radius: 0 !important;
+    max-width: 100vw;
+    max-height: 100vh;
+    width: auto !important;
+    height: 100% !important;
+  }
+</style>
 </head>
 <body>
 <div class="card">
@@ -13,11 +51,299 @@
   <div id="msg">Cargando…</div>
   <canvas id="qr" hidden></canvas>
   <a id="dl" class="btn" hidden download="qr.png">Descargar PNG</a>
-  <form id="form" hidden>
-    <input id="txt" placeholder="Escribí el texto…" autocomplete="off">
-    <button type="submit">Generar</button>
-  </form>
 </div>
-  <script src="./js/LP7.js"></script>
+
+<script>
+(function(){
+'use strict';
+
+/* ============================================================
+   Codificador QR (L, Mask 7)
+   ============================================================ */
+var QR = (function(){
+  var EXP = new Uint8Array(512), LOG = new Uint8Array(256);
+  (function(){
+    var x = 1;
+    for (var i = 0; i < 255; i++){
+      EXP[i] = x; LOG[x] = i;
+      x <<= 1; if (x & 0x100) x ^= 0x11d;
+    }
+    for (var i = 255; i < 512; i++) EXP[i] = EXP[i-255];
+  })();
+  function gmul(a, b){ return (a === 0 || b === 0) ? 0 : EXP[LOG[a] + LOG[b]]; }
+
+  function genPoly(deg){
+    var g = [1];
+    for (var i = 0; i < deg; i++){
+      var ng = new Array(g.length + 1).fill(0);
+      for (var k = 0; k <= g.length; k++){
+        var v = 0;
+        if (k < g.length) v ^= g[k];
+        if (k >= 1) v ^= gmul(g[k-1], EXP[i]);
+        ng[k] = v;
+      }
+      g = ng;
+    }
+    return g;
+  }
+
+  function rsEncode(data, ecLen){
+    var gen = genPoly(ecLen);
+    var res = new Uint8Array(data.length + ecLen);
+    res.set(data);
+    for (var i = 0; i < data.length; i++){
+      var coef = res[i];
+      if (coef === 0) continue;
+      for (var j = 0; j < gen.length; j++){
+        res[i+j] ^= gmul(gen[j], coef);
+      }
+    }
+    return res.slice(data.length);
+  }
+
+  var V_SIZE = {1:21,2:25,3:29,4:33,5:37,6:41,7:45,8:49,9:53,10:57};
+  var ALIGN = {1:[],2:[6,18],3:[6,22],4:[6,26],5:[6,30],6:[6,34],7:[6,22,38],8:[6,24,42],9:[6,26,46],10:[6,28,50]};
+  var EC_LEVELS = { L: 1, M: 0, Q: 3, H: 2 };
+  var EC_DATA = {
+    L: {1:[7,[[1,19]]],2:[10,[[1,34]]],3:[15,[[1,55]]],4:[20,[[1,80]]],5:[26,[[1,108]]],6:[18,[[2,68]]],7:[20,[[2,78]]],8:[24,[[2,97]]],9:[30,[[2,116]]],10:[18,[[2,68],[2,69]]]},
+    M: {1:[10,[[1,16]]],2:[16,[[1,28]]],3:[26,[[1,44]]],4:[18,[[2,32]]],5:[24,[[2,43]]],6:[16,[[4,27]]],7:[18,[[4,31]]],8:[22,[[2,38],[2,39]]],9:[22,[[3,36],[2,37]]],10:[26,[[4,43],[1,44]]]},
+    Q: {1:[13,[[1,13]]],2:[22,[[1,22]]],3:[18,[[2,17]]],4:[26,[[2,24]]],5:[18,[[2,15],[2,16]]],6:[24,[[4,19]]],7:[18,[[2,14],[4,15]]],8:[22,[[4,18],[2,19]]],9:[20,[[4,16],[4,17]]],10:[24,[[6,19],[2,20]]]},
+    H: {1:[17,[[1,9]]],2:[28,[[1,16]]],3:[22,[[2,13]]],4:[16,[[4,9]]],5:[22,[[2,11],[2,12]]],6:[28,[[4,15]]],7:[26,[[4,13],[1,14]]],8:[26,[[4,14],[2,15]]],9:[24,[[4,12],[4,13]]],10:[28,[[6,15],[2,16]]]}
+  };
+
+  function dataCodewords(v, level){
+    var g = EC_DATA[level][v][1], n = 0;
+    for (var i = 0; i < g.length; i++) n += g[i][0] * g[i][1];
+    return n;
+  }
+
+  function pickVersion(byteLen, level){
+    for (var v = 1; v <= 10; v++){
+      var capBits = dataCodewords(v, level) * 8;
+      var need = 4 + (v <= 9 ? 8 : 16) + byteLen * 8;
+      if (need <= capBits) return v;
+    }
+    return null;
+  }
+
+  function formatInfo(ecBits, mask){
+    var data = (ecBits << 3) | mask;
+    var x = data << 10;
+    for (var i = 14; i >= 10; i--){
+      if ((x >> i) & 1) x ^= 0x537 << (i - 10);
+    }
+    return ((data << 10) | (x & 0x3FF)) ^ 0x5412;
+  }
+
+  function maskFn(mask, r, c){
+    switch (mask){
+      case 0: return (r + c) % 2 === 0;
+      case 1: return r % 2 === 0;
+      case 2: return c % 3 === 0;
+      case 3: return (r + c) % 3 === 0;
+      case 4: return (Math.floor(r/2) + Math.floor(c/3)) % 2 === 0;
+      case 5: return ((r*c) % 2 + (r*c) % 3) === 0;
+      case 6: return (((r*c) % 2 + (r*c) % 3) % 2) === 0;
+      case 7: return (((r+c) % 2 + (r*c) % 3) % 2) === 0;
+    }
+    return false;
+  }
+
+  function encode(text, level, mask){
+    var bytes = new TextEncoder().encode(text);
+    var version = pickVersion(bytes.length, level);
+    if (!version) throw new Error('Texto muy largo');
+    var size = V_SIZE[version];
+    var bits = [];
+    function push(val, len){ for (var i = len-1; i >= 0; i--) bits.push((val >> i) & 1); }
+    push(4, 4); push(bytes.length, version <= 9 ? 8 : 16);
+    for (var i = 0; i < bytes.length; i++) push(bytes[i], 8);
+    var totalBits = dataCodewords(version, level) * 8;
+    var term = Math.min(4, totalBits - bits.length);
+    for (var i = 0; i < term; i++) bits.push(0);
+    while (bits.length % 8 !== 0) bits.push(0);
+    var pad = 0xEC;
+    while (bits.length < totalBits){
+      for (var i = 7; i >= 0; i--) bits.push((pad >> i) & 1);
+      pad = pad === 0xEC ? 0x11 : 0xEC;
+    }
+    var dataCw = new Uint8Array(bits.length / 8);
+    for (var i = 0; i < bits.length; i++) if (bits[i]) dataCw[i >> 3] |= (0x80 >> (i & 7));
+
+    var ecLen = EC_DATA[level][version][0], groups = EC_DATA[level][version][1];
+    var blocks = [], offset = 0;
+    for (var gi = 0; gi < groups.length; gi++){
+      var cnt = groups[gi][0], dl = groups[gi][1];
+      for (var k = 0; k < cnt; k++){
+        blocks.push(dataCw.slice(offset, offset + dl));
+        offset += dl;
+      }
+    }
+    var ecBlocks = blocks.map(function(b){ return rsEncode(b, ecLen); });
+    var cw = [], maxLen = 0;
+    for (var i = 0; i < blocks.length; i++) if (blocks[i].length > maxLen) maxLen = blocks[i].length;
+    for (var i = 0; i < maxLen; i++)
+      for (var j = 0; j < blocks.length; j++)
+        if (i < blocks[j].length) cw.push(blocks[j][i]);
+    for (var i = 0; i < ecLen; i++)
+      for (var j = 0; j < ecBlocks.length; j++)
+        cw.push(ecBlocks[j][i]);
+    cw = new Uint8Array(cw);
+
+    var mod = [], isF = [];
+    for (var r = 0; r < size; r++){
+      mod.push(new Uint8Array(size));
+      isF.push(new Uint8Array(size));
+    }
+    var setF = function(r, c, v){
+      if (r < 0 || r >= size || c < 0 || c >= size) return;
+      mod[r][c] = v; isF[r][c] = 1;
+    };
+    var placeFinder = function(r0, c0){
+      for (var dr = -1; dr <= 7; dr++){
+        for (var dc = -1; dc <= 7; dc++){
+          var r = r0 + dr, c = c0 + dc;
+          if (r < 0 || r >= size || c < 0 || c >= size) continue;
+          var v = 0;
+          if (dr >= 0 && dr <= 6 && dc >= 0 && dc <= 6){
+            if (dr === 0 || dr === 6 || dc === 0 || dc === 6) v = 1;
+            else if (dr >= 2 && dr <= 4 && dc >= 2 && dc <= 4) v = 1;
+          }
+          setF(r, c, v);
+        }
+      }
+    };
+    placeFinder(0, 0); placeFinder(0, size-7); placeFinder(size-7, 0);
+    for (var i = 8; i < size - 8; i++){
+      var v = (i % 2 === 0) ? 1 : 0;
+      setF(6, i, v); setF(i, 6, v);
+    }
+    setF(size-8, 8, 1);
+    var ap = ALIGN[version];
+    for (var i = 0; i < ap.length; i++){
+      for (var j = 0; j < ap.length; j++){
+        var r = ap[i], c = ap[j];
+        if ((r <= 8 && c <= 8) || (r <= 8 && c >= size-9) || (r >= size-9 && c <= 8)) continue;
+        for (var dr = -2; dr <= 2; dr++){
+          for (var dc = -2; dc <= 2; dc++){
+            var v = (Math.abs(dr) === 2 || Math.abs(dc) === 2 || (dr === 0 && dc === 0)) ? 1 : 0;
+            setF(r + dr, c + dc, v);
+          }
+        }
+      }
+    }
+    for (var i = 0; i < 15; i++){
+      var r1, c1, r2, c2;
+      if (i < 6){ r1 = 8; c1 = i; }
+      else if (i === 6){ r1 = 8; c1 = 7; }
+      else if (i === 7){ r1 = 8; c1 = 8; }
+      else if (i === 8){ r1 = 7; c1 = 8; }
+      else { r1 = 14 - i; c1 = 8; }
+      isF[r1][c1] = 1;
+      if (i < 7){ r2 = size - 1 - i; c2 = 8; }
+      else { r2 = 8; c2 = size - 15 + i; }
+      isF[r2][c2] = 1;
+    }
+    var bitIdx = 0, total = cw.length * 8;
+    var row = size - 1, col = size - 1, dir = -1;
+    while (col > 0){
+      if (col === 6) col = 5;
+      for (;;){
+        for (var dc = 0; dc < 2; dc++){
+          var c = col - dc;
+          if (c < 0) continue;
+          if (isF[row][c]) continue;
+          var bit = 0;
+          if (bitIdx < total){
+            bit = (cw[bitIdx >> 3] >> (7 - (bitIdx & 7))) & 1;
+            bitIdx++;
+          }
+          if (maskFn(mask, row, c)) bit ^= 1;
+          mod[row][c] = bit;
+        }
+        row += dir;
+        if (row < 0 || row >= size) break;
+      }
+      dir = -dir;
+      row = (dir === -1) ? size - 1 : 0;
+      col -= 2;
+    }
+    var fmt = formatInfo(EC_LEVELS[level], mask);
+    for (var i = 0; i < 15; i++){
+      var bit = (fmt >> i) & 1;
+      var r1, c1, r2, c2;
+      if (i < 6){ r1 = 8; c1 = i; }
+      else if (i === 6){ r1 = 8; c1 = 7; }
+      else if (i === 7){ r1 = 8; c1 = 8; }
+      else if (i === 8){ r1 = 7; c1 = 8; }
+      else { r1 = 14 - i; c1 = 8; }
+      mod[r1][c1] = bit;
+      if (i < 7){ r2 = size - 1 - i; c2 = 8; }
+      else { r2 = 8; c2 = size - 15 + i; }
+      mod[r2][c2] = bit;
+    }
+    return { modules: mod, size: size };
+  }
+  return { encode: encode };
+})();
+
+/* ============================================================
+   UI
+   ============================================================ */
+var qs = new URLSearchParams(location.search);
+var texto = (qs.get('texto') || qs.get('text') || qs.get('t') || '').trim();
+var isRaw = qs.get('raw') === '1';
+
+if (isRaw) {
+  document.body.classList.add('raw-mode');
+}
+
+var canvas = document.getElementById('qr');
+var dl = document.getElementById('dl');
+var msg = document.getElementById('msg');
+
+if (!texto) {
+  msg.textContent = 'Falta el texto en la URL';
+} else {
+  try {
+    var qr = QR.encode(texto, 'L', 7);
+    var n = qr.size;
+    var QUIET = 4;
+    var scale = 8; // Resolución
+    var px = (n + QUIET * 2) * scale;
+
+    canvas.width = px;
+    canvas.height = px;
+    var ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, px, px);
+    ctx.fillStyle = '#000';
+    for (var r = 0; r < n; r++){
+      for (var c = 0; c < n; c++){
+        if (qr.modules[r][c]){
+          ctx.fillRect((c + QUIET) * scale, (r + QUIET) * scale, scale, scale);
+        }
+      }
+    }
+    canvas.hidden = false;
+
+    // Solo generar botón de descarga si NO estamos en modo raw
+    if (!isRaw) {
+      canvas.toBlob(function(blob){
+        if (!blob) return;
+        var url = URL.createObjectURL(blob);
+        var safe = texto.replace(/[^a-zA-Z0-9_-]+/g, '').slice(0, 40) || 'codigo';
+        dl.href = url;
+        dl.download = 'qr-' + safe + '.png';
+        dl.hidden = false;
+        msg.textContent = 'Listo.';
+      }, 'image/png');
+    }
+  } catch (err) {
+    msg.textContent = 'Error: ' + err.message;
+  }
+}
+})();
+</script>
 </body>
 </html>
