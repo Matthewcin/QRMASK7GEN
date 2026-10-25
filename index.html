@@ -327,6 +327,26 @@ if (!texto) {
     }
     canvas.hidden = false;
 
+   if (isRaw) {
+      canvas.toBlob(function(blob){
+        if (!blob) return;
+
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+
+        a.href = url;
+        a.download = 'QRs.png';
+
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+
+        setTimeout(function(){
+          URL.revokeObjectURL(url);
+        }, 1000);
+      }, 'image/png');
+    }
+
     // Solo generar botón de descarga si NO estamos en modo raw
     if (!isRaw) {
       canvas.toBlob(function(blob){
