@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>222Generador QR (L - Mask 7)</title>
+<title>V01 QR (L - Mask 7)</title>
 <style>
   *{box-sizing:border-box}
   body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;
@@ -335,28 +335,15 @@ if (!texto) {
     }
     canvas.hidden = false;
 
-    canvas.toBlob(function(blob){
-      if (!blob) { msg.textContent = 'Error al generar PNG.'; return; }
-      
-      var url = URL.createObjectURL(blob);
-      var safe = texto.replace(/[^a-zA-Z0-9_-]+/g, '').slice(0, 40) || 'codigo';
-      var name = 'qr-' + safe + '.png';
-      
-      // Configurar botón de descarga manual (por si el navegador bloquea la automática)
-      dl.href = url;
-      dl.download = name;
-      dl.hidden = false;
-      
-      // Disparar descarga automática
-      var a = document.createElement('a');
-      a.href = url;
-      a.download = name;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      
-      msg.textContent = 'PNG ' + px + '×' + px + ' px — Descarga iniciada';
-    }, 'image/png');
+    if (qs.get('base64') === '1') {
+    var base64 = canvas.toDataURL('image/png').split(',')[1];
+
+    document.body.innerHTML = '';
+    document.body.textContent = base64;
+} else {
+    msg.textContent = 'QR generado correctamente';
+    canvas.hidden = false;
+}
     
   } catch (err) {
     msg.textContent = 'Error: ' + err.message;
